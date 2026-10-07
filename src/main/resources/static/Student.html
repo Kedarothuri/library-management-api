@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Student Portal - Library</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem auto; max-width: 1000px; padding: 0 1rem; background: #eef2f5; color: #243043; }
+        .box { background: white; padding: 1.25rem; border-radius: 8px; margin-bottom: 1rem; box-shadow: 0 2px 4px #00000012; }
+        input { box-sizing: border-box; padding: .7rem; margin: .35rem 0; width: 100%; max-width: 500px; }
+        button { background: #218838; color: white; border: 0; padding: .65rem .9rem; cursor: pointer; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .message { min-height: 1.4rem; }
+    </style>
+</head>
+<body>
+<p><a href="/">← Home</a></p>
+<div class="box">
+    <h1>Student Registration</h1>
+    <form id="registrationForm">
+        <input type="text" id="sName" placeholder="Full name" required>
+        <input type="email" id="sEmail" placeholder="Email" required>
+        <input type="text" id="sCard" placeholder="Student card ID" required>
+        <button type="submit">Submit registration</button>
+    </form>
+    <p id="registrationMessage" class="message" role="status" aria-live="polite"></p>
+</div>
+<div class="box">
+    <h2>Available books</h2>
+    <label for="myStudentId">Approved student ID</label>
+    <input type="number" min="1" id="myStudentId" placeholder="Enter your approved student ID">
+    <p id="booksMessage" class="message" role="status" aria-live="polite"></p>
+    <table><thead><tr><th>Title</th><th>Author</th><th>Status</th><th>Action</th></tr></thead><tbody id="booksBody"></tbody></table>
+</div>
+<script>
+    async function responseBody(response) {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.message || `Request failed (${response.status})`);
+        return data;
+    }
+    document.getElementById('registrationForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        const message = document.getElementById('registrationMessage'); message.textContent = '';
+        const params = new URLSearchParams({ name: document.getElementById('sName').value.trim(), email: document.getElementById('sEmail').value.trim(), studentCardId: document.getElementById('sCard').value.trim() });
+        try {
+            const student = await responseBody(await fetch(`/api/students/register?${params}`, { method: 'POST' }));
+            message.textContent = `Registered! Your student ID is ${student.id}. Status: ${student.status}.`;
+            event.target.reset();
+        } catch (error) { message.textContent = error.message; }
+    });
+    async function loadBooks() {
+        const tbody = document.getElementById('booksBody'); tbody.replaceChildren();
+        try {
+            const books = await responseBody(await fetch('/api/books'));
+            if (!books.length) { const row = tbody.insertRow(); const cell = row.insertCell(); cell.colSpan = 4; cell.textContent = 'No books are listed yet.'; return; }
+            books.forEach(book => {
+                const row = tbody.insertRow();
+                [book.title, book.author, book.available ? 'Available' : `Borrowed${book.borrowerName ? ` by ${book.borrowerName}` : ''}`].forEach(value => { row.insertCell().textContent = value ?? ''; });
+                const action = row.insertCell();
+                if (book.available) {
+                    const button = document.createElement('button'); button.textContent = 'Borrow';
+                    button.addEventListener('click', () => borrowBook(book.id)); action.append(button);
+                } else action.textContent = 'Unavailable';
+            });
+        } catch (error) { document.getElementById('booksMessage').textContent = error.message; }
+    }
+    async function borrowBook(bookId) {
+        const input = document.getElementById('myStudentId'); const studentId = input.value;
+        const message = document.getElementById('booksMessage'); message.textContent = '';
+        if (!studentId || Number(studentId) < 1) { message.textContent = 'Enter your approved student ID first.'; input.focus(); return; }
+        try { await responseBody(await fetch(`/api/books/${bookId}/borrow/${encodeURIComponent(studentId)}`, { method: 'PUT' })); message.textContent = 'Book borrowed successfully.'; await loadBooks(); }
+        catch (error) { message.textContent = error.message; }
+    }
+    loadBooks();
+</script>
+</body>
+</html>

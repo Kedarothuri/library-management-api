@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Library Admin</title>
+    <style>
+        body { font: 16px Arial, sans-serif; margin: 2rem auto; max-width: 1100px; padding: 0 1rem; color: #243043; background: #f4f7fb; }
+        header, section { background: white; padding: 1.25rem; margin-bottom: 1rem; border-radius: 10px; box-shadow: 0 2px 8px #172b4d12; }
+        header { display: flex; justify-content: space-between; align-items: center; }
+        a { color: #145bb8; } form { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: 1rem; }
+        input, button { padding: .65rem; } input { border: 1px solid #cbd5e1; border-radius: 5px; }
+        button { border: 0; border-radius: 5px; cursor: pointer; background: #145bb8; color: white; }
+        button.danger { background: #b42318; } table { border-collapse: collapse; width: 100%; } th, td { text-align: left; padding: .65rem; border-bottom: 1px solid #e2e8f0; }
+        .message { min-height: 1.3rem; color: #b42318; } .actions { display: flex; gap: .4rem; }
+    </style>
+</head>
+<body>
+<header><h1>Library Admin</h1><a href="/">Home</a></header>
+<p id="message" class="message" role="status" aria-live="polite"></p>
+<section>
+    <h2>Pending student registrations</h2>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Student card</th><th>Actions</th></tr></thead><tbody id="pendingStudents"></tbody></table>
+</section>
+<section>
+    <h2>All students</h2>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Status</th></tr></thead><tbody id="allStudents"></tbody></table>
+</section>
+<section>
+    <h2>Add a book</h2>
+    <form id="bookForm"><input id="bookTitle" placeholder="Book title" required><input id="bookAuthor" placeholder="Author" required><button type="submit">Add book</button></form>
+    <h2>Books</h2>
+    <table><thead><tr><th>ID</th><th>Title</th><th>Author</th><th>Status</th><th>Action</th></tr></thead><tbody id="booksBody"></tbody></table>
+</section>
+<script>
+    const STUDENTS_API = '/api/students';
+    const BOOKS_API = '/api/books';
+    const message = document.getElementById('message');
+
+    async function request(url, options) {
+        const response = await fetch(url, options);
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.message || `Request failed (${response.status})`);
+        return body;
+    }
+    function cell(row, value) { const td = row.insertCell(); td.textContent = value ?? ''; return td; }
+    function showError(error) { message.textContent = error.message || 'Something went wrong. Please try again.'; }
+
+    async function loadData() {
+        message.textContent = '';
+        try {
+            const [pending, students, books] = await Promise.all([
+                request(`${STUDENTS_API}?status=PENDING`), request(STUDENTS_API), request(BOOKS_API)
+            ]);
+            renderStudents('pendingStudents', pending, true);
+            renderStudents('allStudents', students, false);
+            renderBooks(books);
+        } catch (error) { showError(error); }
+    }
+    function renderStudents(targetId, students, pendingOnly) {
+        const tbody = document.getElementById(targetId);
+        tbody.replaceChildren();
+        if (!students.length) { const row = tbody.insertRow(); const td = row.insertCell(); td.colSpan = pendingOnly ? 5 : 4; td.textContent = 'No students found.'; return; }
+        students.forEach(student => {
+            const row = tbody.insertRow();
+            cell(row, student.id); cell(row, student.name); cell(row, student.email);
+            if (pendingOnly) {
+                cell(row, student.studentCardId);
+                const actions = row.insertCell(); actions.className = 'actions';
+                [['approve', 'Approve', false], ['reject', 'Reject', true]].forEach(([action, label, danger]) => {
+                    const button = document.createElement('button'); button.textContent = label;
+                    if (danger) button.className = 'danger';
+                    button.addEventListener('click', async () => {
+                        try { await request(`${STUDENTS_API}/${student.id}/${action}`, { method: 'PUT' }); await loadData(); }
+                        catch (error) { showError(error); }
+                    }); actions.append(button);
+                });
+            } else cell(row, student.status);
+        });
+    }
+    function renderBooks(books) {
+        const tbody = document.getElementById('booksBody'); tbody.replaceChildren();
+        if (!books.length) { const row = tbody.insertRow(); const td = row.insertCell(); td.colSpan = 5; td.textContent = 'No books found.'; return; }
+        books.forEach(book => {
+            const row = tbody.insertRow(); cell(row, book.id); cell(row, book.title); cell(row, book.author);
+            cell(row, book.available ? 'Available' : `Borrowed${book.borrowerName ? ` by ${book.borrowerName}` : ''}`);
+            if (!book.available) {
+                const button = document.createElement('button'); button.textContent = 'Mark returned';
+                button.addEventListener('click', async () => {
+                    try { await request(`${BOOKS_API}/${book.id}/return`, { method: 'PUT' }); await loadData(); }
+                    catch (error) { showError(error); }
+                }); row.insertCell().append(button);
+            } else row.insertCell().textContent = '—';
+        });
+    }
+    document.getElementById('bookForm').addEventListener('submit', async event => {
+        event.preventDefault();
+        try {
+            await request(BOOKS_API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: document.getElementById('bookTitle').value.trim(), author: document.getElementById('bookAuthor').value.trim() }) });
+            event.target.reset(); await loadData();
+        } catch (error) { showError(error); }
+    });
+    loadData();
+</script>
+</body>
+</html>
